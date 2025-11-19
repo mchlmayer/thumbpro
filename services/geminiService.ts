@@ -6,9 +6,9 @@ if (!process.env.API_KEY) {
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-// Configuração dos Modelos
-const IMAGE_MODEL = 'imagen-3.0-generate-001'; // Modelo para CRIAR imagens (mais estável)
-const VISION_MODEL = 'gemini-1.5-flash';       // Modelo para LER imagens e texto (rápido)
+// Configuração dos Modelos com VERSÕES ESPECÍFICAS para evitar erro 404
+const IMAGE_MODEL = 'imagen-3.0-generate-001'; // Modelo para CRIAR imagens
+const VISION_MODEL = 'gemini-1.5-flash-001';   // Modelo para LER imagens (Versão 001 estável)
 
 /**
  * Gera imagem apenas com texto usando Imagen 3.0
@@ -46,8 +46,8 @@ export const generateImageWithText = async (
 
 /**
  * Fluxo Inteligente:
- * 1. Usa Gemini Flash para descrever a imagem de referência.
- * 2. Usa Imagen 3.0 para gerar uma nova imagem baseada na descrição + prompt do usuário.
+ * 1. Usa Gemini Flash 001 para descrever a imagem de referência.
+ * 2. Usa Imagen 3.0 para gerar uma nova imagem baseada na descrição.
  */
 export const generateImageWithReference = async (
     prompt: string, 
@@ -64,7 +64,7 @@ export const generateImageWithReference = async (
             inlineData: { data: image.data, mimeType: image.mimeType },
         }));
 
-        // Chama o modelo de texto para "ver" a imagem
+        // Chama o modelo de texto (Flash 001) para "ver" a imagem
         const descriptionResponse = await ai.models.generateContent({
             model: VISION_MODEL,
             contents: { parts: [...imageParts, { text: descriptionPrompt }] }
@@ -81,7 +81,7 @@ export const generateImageWithReference = async (
            Ensure high quality, photorealistic, 8k.
         `;
 
-        // Chama o modelo de imagem
+        // Chama o modelo de imagem (Imagen 3.0)
         return await generateImageWithText(finalPrompt, aspectRatio);
 
     } catch (error) {
@@ -93,11 +93,16 @@ export const generateImageWithReference = async (
 // Helper para tratar erros comuns
 function handleApiError(error: any): never {
     if (error instanceof Error) {
+        // Erro de Quota (Limite de uso)
         if (error.message.includes('429') || error.message.includes('RESOURCE_EXHAUSTED')) {
             throw new Error("Limite de requisições atingido (Quota). Aguarde 1 minuto e tente novamente.");
         }
+        // Erro de Modelo não encontrado (404)
+        if (error.message.includes('404') || error.message.includes('not found')) {
+             throw new Error(`O modelo configurado não está disponível para sua chave. Detalhes: ${error.message}`);
+        }
+        // Erro genérico de requisição inválida
         if (error.message.includes('400') || error.message.includes('INVALID_ARGUMENT')) {
-             // Fallback silencioso se o modelo específico falhar, tenta mensagem genérica
              throw new Error("Erro de compatibilidade com o modelo. Tente um prompt mais simples.");
         }
         throw error;
