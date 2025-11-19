@@ -1,25 +1,25 @@
 import { GoogleGenAI, Modality } from "@google/genai";
 
-if (!process.env.API_KEY) {
-  throw new Error("API_KEY environment variable not set");
-}
-
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
 // Utilitário para aguardar um tempo (em ms)
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 /**
  * Generates an image using Gemini 2.5 Flash Image.
- * Optimized for free tier: faster retries, fail fast approach.
+ * Optimized for free tier with exponential backoff.
  */
 export const generateImageWithText = async (
     prompt: string, 
     aspectRatio: string = '16:9'
 ): Promise<string> => {
+  if (!process.env.API_KEY) {
+    throw new Error("API_KEY environment variable not set");
+  }
+  
+  // Initialize client per request to ensure freshness
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+
   let attempts = 0;
-  // Reduzido para 3 tentativas para evitar que o usuário espere eternamente.
-  const maxAttempts = 3;
+  const maxAttempts = 5;
 
   // Prompt otimizado para o modelo Flash
   const enhancedPrompt = `Create a high quality YouTube Thumbnail. Aspect Ratio: ${aspectRatio}. Description: ${prompt}. Vivid colors, 4k resolution.`;
@@ -63,10 +63,12 @@ export const generateImageWithText = async (
         const isQuotaError = error instanceof Error && (error.message.includes('429') || error.message.includes('RESOURCE_EXHAUSTED') || error.message.includes('quota'));
         
         if (isQuotaError && attempts < maxAttempts) {
-            // Espera fixa curta de 3 segundos. É melhor falhar rápido e deixar o usuário tentar de novo
-            // do que deixar a tela presa por minutos.
-            const delay = 3000; 
-            console.warn(`Quota hit (Attempt ${attempts}). Retrying in ${delay}ms...`);
+            // Backoff Exponencial: 2s, 4s, 8s, 10s, 10s...
+            // Isso permite cobrir janelas de tempo maiores onde o limite gratuito reseta.
+            const backoff = Math.min(10000, Math.pow(2, attempts) * 1000);
+            const delay = backoff + (Math.random() * 1000); // Jitter
+            
+            console.warn(`Quota hit (Attempt ${attempts}). Retrying in ${Math.round(delay)}ms...`);
             await wait(delay);
             continue;
         }
@@ -74,7 +76,7 @@ export const generateImageWithText = async (
         console.error("Error calling Gemini API:", error);
         if (error instanceof Error) {
             if (isQuotaError) {
-              throw new Error("Muitos acessos simultâneos. Por favor, clique em 'Gerar' novamente.");
+              throw new Error("Muitos acessos recentes. O limite gratuito foi atingido momentaneamente. Aguarde 1 minuto e tente novamente.");
             }
             if (error.message.includes('safetySetting') || error.message.includes('blocked')) {
                 throw new Error("A imagem não pôde ser gerada devido aos filtros de segurança do Google. Tente mudar a descrição.");
@@ -95,8 +97,14 @@ export const generateImageWithReference = async (
     images: Array<{ data: string; mimeType: string }>,
     aspectRatio: string = '16:9'
 ): Promise<string> => {
+    if (!process.env.API_KEY) {
+        throw new Error("API_KEY environment variable not set");
+    }
+
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+
     let attempts = 0;
-    const maxAttempts = 3;
+    const maxAttempts = 5;
 
     while (true) {
         try {
@@ -151,8 +159,9 @@ export const generateImageWithReference = async (
             const isQuotaError = error instanceof Error && (error.message.includes('429') || error.message.includes('RESOURCE_EXHAUSTED') || error.message.includes('quota'));
 
             if (isQuotaError && attempts < maxAttempts) {
-                const delay = 3000;
-                console.warn(`Quota hit (Ref Attempt ${attempts}). Retrying in ${delay}ms...`);
+                const backoff = Math.min(10000, Math.pow(2, attempts) * 1000);
+                const delay = backoff + (Math.random() * 1000);
+                console.warn(`Quota hit (Ref Attempt ${attempts}). Retrying in ${Math.round(delay)}ms...`);
                 await wait(delay);
                 continue;
             }
@@ -160,7 +169,7 @@ export const generateImageWithReference = async (
             console.error("Error calling Gemini API:", error);
             if (error instanceof Error) {
                 if (isQuotaError) {
-                    throw new Error("Tráfego alto. Tente novamente em alguns instantes.");
+                    throw new Error("Limite de tráfego atingido. Tente novamente em 1 minuto.");
                 }
                 if (error.message.includes('safetySetting') || error.message.includes('blocked')) {
                      throw new Error("Conteúdo bloqueado pelos filtros de segurança. Tente suavizar a descrição.");
