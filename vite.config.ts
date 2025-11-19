@@ -3,7 +3,7 @@ import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 
 export default defineConfig(({ mode }) => {
-  // Carrega as variáveis de ambiente corretamente
+  // Carrega variáveis de ambiente do diretório atual
   const env = loadEnv(mode, process.cwd(), '');
 
   return {
@@ -13,14 +13,14 @@ export default defineConfig(({ mode }) => {
     },
     plugins: [react()],
     define: {
-      // Disponibiliza a API Key para o frontend
+      // Define as chaves de API
       'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)
     },
     resolve: {
       alias: {
-        // Corrige o apontamento do @ para a pasta src
-        '@': path.resolve(__dirname, './src'),
+        // IMPORTANTE: O ponto '.' indica que o @ refere-se à raiz do projeto (sem pasta src)
+        '@': path.resolve(__dirname, '.'),
       }
     },
     build: {
