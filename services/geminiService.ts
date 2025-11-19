@@ -153,7 +153,7 @@ export const generateImageWithReference = async (
             }
 
             if (!base64ImageBytes) {
-                 throw new Error("O modelo não retornou uma imagem válida.");
+                  throw new Error("O modelo não retornou uma imagem válida.");
             }
             
             return base64ImageBytes;
@@ -175,7 +175,7 @@ export const generateImageWithReference = async (
                     throw new Error("Limite de uso atingido. Aguardando liberação de recursos...");
                 }
                 if (error.message.includes('safetySetting')) {
-                     throw new Error("Erro de configuração da API (Safety Settings). Tente novamente.");
+                      throw new Error("Erro de configuração da API (Safety Settings). Tente novamente.");
                 }
                 throw new Error(`Falha ao gerar imagem com referência: ${error.message}`);
             }
