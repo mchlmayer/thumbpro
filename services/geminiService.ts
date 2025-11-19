@@ -18,7 +18,8 @@ export const generateImageWithText = async (
     aspectRatio: string = '16:9'
 ): Promise<string> => {
   let attempts = 0;
-  const maxAttempts = 5;
+  // Aumentado para 10 tentativas para garantir que passe por janelas de 1 minuto de cota
+  const maxAttempts = 10;
 
   // Append aspect ratio instruction to the prompt since Flash Image handles it via text better than config sometimes
   const enhancedPrompt = `${prompt}. The image should be in ${aspectRatio} aspect ratio. High quality YouTube Thumbnail, vivid colors.`;
@@ -66,8 +67,10 @@ export const generateImageWithText = async (
         const isQuotaError = error instanceof Error && (error.message.includes('429') || error.message.includes('RESOURCE_EXHAUSTED') || error.message.includes('quota'));
         
         if (isQuotaError && attempts < maxAttempts) {
-            // Agressive backoff for free tier: 5s, 10s, 20s...
-            const delay = (5000 * attempts) + (Math.random() * 2000); 
+            // Estratégia muito agressiva para limites de 1 minuto.
+            // Espera progressiva: 15s, 30s, 45s...
+            // Isso garante que superaremos o limite de "requests per minute".
+            const delay = 15000 * attempts; 
             console.warn(`Quota hit (Gemini Flash Image). Retrying in ${delay}ms...`);
             await wait(delay);
             continue;
@@ -76,7 +79,7 @@ export const generateImageWithText = async (
         console.error("Error calling Gemini API:", error);
         if (error instanceof Error) {
             if (isQuotaError) {
-              throw new Error("O sistema está com alto tráfego (Quota). Tentando reconectar... Aguarde alguns instantes e tente novamente.");
+              throw new Error("O sistema está com tráfego extremamente alto. Tente novamente em alguns minutos.");
             }
             if (error.message.includes('safetySetting')) {
                 throw new Error("Erro de configuração de segurança no modelo.");
@@ -99,7 +102,8 @@ export const generateImageWithReference = async (
     aspectRatio: string = '16:9'
 ): Promise<string> => {
     let attempts = 0;
-    const maxAttempts = 5;
+    // Aumentado para 10 tentativas para garantir robustez contra erros de cota
+    const maxAttempts = 10;
 
     while (true) {
         try {
@@ -153,7 +157,7 @@ export const generateImageWithReference = async (
             }
 
             if (!base64ImageBytes) {
-                  throw new Error("O modelo não retornou uma imagem válida.");
+                 throw new Error("O modelo não retornou uma imagem válida.");
             }
             
             return base64ImageBytes;
@@ -162,8 +166,9 @@ export const generateImageWithReference = async (
             const isQuotaError = error instanceof Error && (error.message.includes('429') || error.message.includes('RESOURCE_EXHAUSTED') || error.message.includes('quota'));
 
             if (isQuotaError && attempts < maxAttempts) {
-                // Aggressive backoff for reference editing as well
-                const delay = (5000 * attempts) + (Math.random() * 2000);
+                // Estratégia muito agressiva para limites de 1 minuto.
+                // Espera progressiva: 15s, 30s, 45s...
+                const delay = 15000 * attempts;
                 console.warn(`Quota hit (Gemini Flash Image Ref). Retrying in ${delay}ms...`);
                 await wait(delay);
                 continue;
@@ -172,10 +177,10 @@ export const generateImageWithReference = async (
             console.error("Error calling Gemini API:", error);
             if (error instanceof Error) {
                 if (isQuotaError) {
-                    throw new Error("Limite de uso atingido. Aguardando liberação de recursos...");
+                    throw new Error("Muitas solicitações recentes. Aguarde um momento antes de tentar novamente.");
                 }
                 if (error.message.includes('safetySetting')) {
-                      throw new Error("Erro de configuração da API (Safety Settings). Tente novamente.");
+                     throw new Error("Erro de configuração da API (Safety Settings). Tente novamente.");
                 }
                 throw new Error(`Falha ao gerar imagem com referência: ${error.message}`);
             }
