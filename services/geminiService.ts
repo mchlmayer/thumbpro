@@ -6,43 +6,41 @@ if (!process.env.API_KEY) {
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-// CONFIGURAÇÃO DE MODELOS
+// MODELO DE CRIAÇÃO DE IMAGEM (Estável)
 const IMAGE_MODEL = 'imagen-3.0-generate-001'; 
-const VISION_MODEL = 'gemini-2.0-flash-exp';   
 
 // Helper para esperar (delay)
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 /**
- * Função mágica que tenta rodar o comando várias vezes se der erro de Quota
+ * Tenta executar uma operação. Se der erro de Quota (429), espera e tenta de novo.
  */
-async function withRetry<T>(operation: () => Promise<T>, retries = 3, initialDelay = 10000): Promise<T> {
+async function withRetry<T>(operation: () => Promise<T>, retries = 2, initialDelay = 60000): Promise<T> {
     try {
         return await operation();
     } catch (error: any) {
-        // Se for erro de Quota (429) e ainda tivermos tentativas
-        if (retries > 0 && (error.message?.includes('429') || error.message?.includes('RESOURCE_EXHAUSTED') || error.message?.includes('Quota'))) {
-            console.warn(`Cota atingida. Aguardando ${initialDelay/1000} segundos para tentar de novo... (${retries} restantes)`);
-            // Espera o tempo determinado
+        const errorMessage = error.message || JSON.stringify(error);
+        
+        // Verifica se é erro de Quota/Limite
+        if (retries > 0 && (errorMessage.includes('429') || errorMessage.includes('RESOURCE_EXHAUSTED') || errorMessage.includes('Quota'))) {
+            console.warn(`⚠️ Cota atingida. O Google pediu uma pausa. Aguardando ${initialDelay/1000} segundos...`);
             await wait(initialDelay);
-            // Tenta de novo com um tempo de espera maior (Exponential Backoff)
-            return withRetry(operation, retries - 1, initialDelay + 5000);
+            return withRetry(operation, retries - 1, initialDelay);
         }
         throw error;
     }
 }
 
 /**
- * Gera imagem apenas com texto (com Retry)
+ * Gera imagem apenas com texto
  */
 export const generateImageWithText = async (
     prompt: string, 
     aspectRatio: string = '16:9'
 ): Promise<string> => {
-  // Envolvemos a chamada na função withRetry
   return withRetry(async () => {
       try {
-        console.log(`Gerando imagem com Texto (Imagen 3.0) [Ratio: ${aspectRatio}]`);
+        console.log(`Gerando imagem com Texto (Imagen 3.0)...`);
 
         const response = await ai.models.generateImages({
           model: IMAGE_MODEL,
@@ -63,44 +61,62 @@ export const generateImageWithText = async (
 
       } catch (error) {
         console.error("Erro no Imagen 3.0:", error);
-        // Relança o erro para o withRetry pegar
         throw error; 
       }
   });
 };
 
 /**
- * Fluxo Inteligente (Ler -> Criar) (com Retry)
+ * Função interna para tentar descrever a imagem com múltiplos modelos (Fallback)
+ */
+async function describeImageWithFallback(imageParts: any[], prompt: string): Promise<string> {
+    // Lista de modelos para tentar (do mais rápido para o mais potente)
+    const visionModels = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro-vision'];
+
+    for (const model of visionModels) {
+        try {
+            console.log(`Tentando descrever imagem com modelo: ${model}`);
+            const response = await ai.models.generateContent({
+                model: model,
+                contents: { parts: [...imageParts, { text: prompt }] }
+            });
+            
+            const text = response.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (text) return text;
+            
+        } catch (error: any) {
+            console.warn(`Falha ao usar modelo ${model}:`, error.message);
+            // Se for erro de cota, não adianta trocar de modelo imediatamente, melhor esperar no retry externo
+            if (error.message?.includes('429') || error.message?.includes('RESOURCE')) throw error;
+            // Se for outro erro (404, etc), continua o loop para o próximo modelo
+            continue;
+        }
+    }
+    throw new Error("Não foi possível processar a imagem de referência com nenhum modelo disponível.");
+}
+
+/**
+ * Fluxo Inteligente (Ler -> Criar)
  */
 export const generateImageWithReference = async (
     prompt: string, 
     images: Array<{ data: string; mimeType: string }>,
     aspectRatio: string = '16:9'
 ): Promise<string> => {
-    // Aqui também usamos retry, pois a leitura da imagem também consome quota
     return withRetry(async () => {
         try {
-            console.log("Iniciando fluxo de Referência (Ler -> Criar)...");
+            console.log("Iniciando fluxo de Referência...");
             
-            const descriptionPrompt = "Describe this image in extreme detail, focusing on the lighting, style, composition, and main subject. Be concise.";
+            const descriptionPrompt = "Describe this image in detail, mainly the style and subject.";
             
             const imageParts = images.map(image => ({
                 inlineData: { data: image.data, mimeType: image.mimeType },
             }));
 
-            // Passo 1: Ler a imagem (Flash 2.0)
-            const descriptionResponse = await ai.models.generateContent({
-                model: VISION_MODEL,
-                contents: { parts: [...imageParts, { text: descriptionPrompt }] }
-            });
+            // Tenta obter a descrição usando o sistema de fallback
+            const imageDescription = await describeImageWithFallback(imageParts, descriptionPrompt);
+            console.log("Descrição obtida com sucesso.");
 
-            const imageDescription = descriptionResponse.candidates?.[0]?.content?.parts?.[0]?.text || "";
-            console.log("Descrição gerada com sucesso.");
-
-            // Passo 2: Criar a imagem (Imagen 3.0)
-            // Chamamos a função de texto que já tem seu próprio retry, 
-            // mas para garantir, chamamos a lógica direta aqui para evitar duplo wrap desnecessário ou erros de contexto
-            
             const finalPrompt = `
             Create a YouTube thumbnail.
             Reference Style/Content: ${imageDescription}
@@ -108,7 +124,9 @@ export const generateImageWithReference = async (
             Ensure high quality, photorealistic, 8k.
             `;
 
-            const response = await ai.models.generateImages({
+            // Usa a função de texto (que já usa o Imagen 3.0) para gerar a final
+            // Chamamos direto a API aqui para evitar aninhamento de retries desnecessário
+             const response = await ai.models.generateImages({
                 model: IMAGE_MODEL,
                 prompt: finalPrompt,
                 config: {
@@ -120,7 +138,7 @@ export const generateImageWithReference = async (
             });
 
             if (!response.generatedImages?.[0]?.image?.imageBytes) {
-                throw new Error("A API não retornou os dados da imagem.");
+                throw new Error("A API retornou vazio na etapa final.");
             }
 
             return response.generatedImages[0].image.imageBytes;
