@@ -6,9 +6,11 @@ if (!process.env.API_KEY) {
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-// Configuração dos Modelos com VERSÕES ESPECÍFICAS para evitar erro 404
-const IMAGE_MODEL = 'imagen-3.0-generate-001'; // Modelo para CRIAR imagens
-const VISION_MODEL = 'gemini-1.5-flash-001';   // Modelo para LER imagens (Versão 001 estável)
+// CONFIGURAÇÃO FINAL DE MODELOS
+// 1. Imagen 3.0: O melhor para CRIAR imagens (Estável)
+const IMAGE_MODEL = 'imagen-3.0-generate-001'; 
+// 2. Gemini 2.0 Flash Exp: O mais rápido para LER/DESCREVER imagens (Sabemos que sua chave acessa este)
+const VISION_MODEL = 'gemini-2.0-flash-exp';   
 
 /**
  * Gera imagem apenas com texto usando Imagen 3.0
@@ -31,7 +33,6 @@ export const generateImageWithText = async (
       },
     });
 
-    // Validação robusta da resposta
     if (!response.generatedImages?.[0]?.image?.imageBytes) {
         throw new Error("A API não retornou os dados da imagem.");
     }
@@ -46,7 +47,7 @@ export const generateImageWithText = async (
 
 /**
  * Fluxo Inteligente:
- * 1. Usa Gemini Flash 001 para descrever a imagem de referência.
+ * 1. Usa Gemini 2.0 Flash para descrever a imagem de referência.
  * 2. Usa Imagen 3.0 para gerar uma nova imagem baseada na descrição.
  */
 export const generateImageWithReference = async (
@@ -57,14 +58,14 @@ export const generateImageWithReference = async (
     try {
         console.log("Iniciando fluxo de Referência (Ler -> Criar)...");
         
-        // Passo 1: Descrever a imagem de referência (Engenharia de Prompt Reversa)
+        // Passo 1: Descrever a imagem de referência
         const descriptionPrompt = "Describe this image in extreme detail, focusing on the lighting, style, composition, and main subject. Be concise.";
         
         const imageParts = images.map(image => ({
             inlineData: { data: image.data, mimeType: image.mimeType },
         }));
 
-        // Chama o modelo de texto (Flash 001) para "ver" a imagem
+        // Chama o modelo de texto/visão (Flash 2.0)
         const descriptionResponse = await ai.models.generateContent({
             model: VISION_MODEL,
             contents: { parts: [...imageParts, { text: descriptionPrompt }] }
@@ -93,17 +94,13 @@ export const generateImageWithReference = async (
 // Helper para tratar erros comuns
 function handleApiError(error: any): never {
     if (error instanceof Error) {
-        // Erro de Quota (Limite de uso)
+        // Erro de Quota
         if (error.message.includes('429') || error.message.includes('RESOURCE_EXHAUSTED')) {
             throw new Error("Limite de requisições atingido (Quota). Aguarde 1 minuto e tente novamente.");
         }
-        // Erro de Modelo não encontrado (404)
+        // Erro de Modelo não encontrado
         if (error.message.includes('404') || error.message.includes('not found')) {
-             throw new Error(`O modelo configurado não está disponível para sua chave. Detalhes: ${error.message}`);
-        }
-        // Erro genérico de requisição inválida
-        if (error.message.includes('400') || error.message.includes('INVALID_ARGUMENT')) {
-             throw new Error("Erro de compatibilidade com o modelo. Tente um prompt mais simples.");
+             throw new Error(`Erro de modelo (${error.message}). Tente novamente em instantes.`);
         }
         throw error;
     }
