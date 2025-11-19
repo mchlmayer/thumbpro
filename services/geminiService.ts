@@ -67,11 +67,17 @@ export const generateImageWithText = async (
 };
 
 /**
- * Função interna para tentar descrever a imagem com múltiplos modelos (Fallback)
+ * Tenta descrever a imagem usando vários modelos diferentes até um funcionar.
  */
 async function describeImageWithFallback(imageParts: any[], prompt: string): Promise<string> {
-    // Lista de modelos para tentar (do mais rápido para o mais potente)
-    const visionModels = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro-vision'];
+    // Lista de modelos para tentar, do mais novo para o mais antigo
+    // Removemos o 2.0-exp pois sua conta não tem acesso
+    const visionModels = [
+        'gemini-1.5-flash',       // Padrão rápido
+        'gemini-1.5-flash-latest',// Alternativa do rápido
+        'gemini-1.5-pro',         // Mais potente (mas mais lento)
+        'gemini-pro-vision'       // Legado (último recurso)
+    ];
 
     for (const model of visionModels) {
         try {
@@ -85,14 +91,23 @@ async function describeImageWithFallback(imageParts: any[], prompt: string): Pro
             if (text) return text;
             
         } catch (error: any) {
-            console.warn(`Falha ao usar modelo ${model}:`, error.message);
-            // Se for erro de cota, não adianta trocar de modelo imediatamente, melhor esperar no retry externo
-            if (error.message?.includes('429') || error.message?.includes('RESOURCE')) throw error;
-            // Se for outro erro (404, etc), continua o loop para o próximo modelo
+            const msg = error.message || '';
+            console.warn(`Falha ao usar modelo ${model}:`, msg);
+            
+            // Se o erro for 'limit: 0' (sem acesso), pula imediatamente para o próximo modelo
+            if (msg.includes('limit: 0') || msg.includes('not found') || msg.includes('404')) {
+                continue; 
+            }
+            
+            // Se for cota temporária (429 mas com limite > 0), lança o erro para o retry externo esperar
+            if (msg.includes('429') || msg.includes('RESOURCE')) {
+                throw error;
+            }
+            // Tenta o próximo modelo da lista
             continue;
         }
     }
-    throw new Error("Não foi possível processar a imagem de referência com nenhum modelo disponível.");
+    throw new Error("Não foi possível ler a imagem de referência. Sua conta parece não ter acesso aos modelos de visão atuais.");
 }
 
 /**
@@ -113,7 +128,7 @@ export const generateImageWithReference = async (
                 inlineData: { data: image.data, mimeType: image.mimeType },
             }));
 
-            // Tenta obter a descrição usando o sistema de fallback
+            // Aqui usamos a nova função robusta que tenta vários modelos
             const imageDescription = await describeImageWithFallback(imageParts, descriptionPrompt);
             console.log("Descrição obtida com sucesso.");
 
@@ -124,8 +139,6 @@ export const generateImageWithReference = async (
             Ensure high quality, photorealistic, 8k.
             `;
 
-            // Usa a função de texto (que já usa o Imagen 3.0) para gerar a final
-            // Chamamos direto a API aqui para evitar aninhamento de retries desnecessário
              const response = await ai.models.generateImages({
                 model: IMAGE_MODEL,
                 prompt: finalPrompt,
