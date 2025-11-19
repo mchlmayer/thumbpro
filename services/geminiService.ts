@@ -13,7 +13,7 @@ const IMAGE_MODEL = 'imagen-3.0-generate-001';
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 /**
- * Tenta executar uma operação. Se der erro de Quota (429), espera e tenta de novo.
+ * Tenta executar uma operação com Retry automático se der erro de Cota.
  */
 async function withRetry<T>(operation: () => Promise<T>, retries = 2, initialDelay = 60000): Promise<T> {
     try {
@@ -23,7 +23,7 @@ async function withRetry<T>(operation: () => Promise<T>, retries = 2, initialDel
         
         // Verifica se é erro de Quota/Limite
         if (retries > 0 && (errorMessage.includes('429') || errorMessage.includes('RESOURCE_EXHAUSTED') || errorMessage.includes('Quota'))) {
-            console.warn(`⚠️ Cota atingida. O Google pediu uma pausa. Aguardando ${initialDelay/1000} segundos...`);
+            console.warn(`⚠️ Cota atingida. Pausando por ${initialDelay/1000}s...`);
             await wait(initialDelay);
             return withRetry(operation, retries - 1, initialDelay);
         }
@@ -67,47 +67,52 @@ export const generateImageWithText = async (
 };
 
 /**
- * Tenta descrever a imagem usando vários modelos diferentes até um funcionar.
+ * Tenta descrever a imagem usando uma lista exaustiva de modelos.
  */
 async function describeImageWithFallback(imageParts: any[], prompt: string): Promise<string> {
-    // Lista de modelos para tentar, do mais novo para o mais antigo
-    // Removemos o 2.0-exp pois sua conta não tem acesso
+    // LISTA COMPLETA DE MODELOS (Do mais leve/novo para o mais antigo)
+    // Se um falhar, ele tenta o próximo.
     const visionModels = [
-        'gemini-1.5-flash',       // Padrão rápido
-        'gemini-1.5-flash-latest',// Alternativa do rápido
-        'gemini-1.5-pro',         // Mais potente (mas mais lento)
-        'gemini-pro-vision'       // Legado (último recurso)
+        'gemini-1.5-flash',         // Padrão atual
+        'gemini-1.5-flash-001',     // Versão específica 001
+        'gemini-1.5-flash-002',     // Versão específica 002
+        'gemini-1.5-flash-8b',      // Versão "Micro" (muito rápida e acessível)
+        'gemini-1.5-pro',           // Pro padrão
+        'gemini-1.5-pro-001',       // Pro versão 001
+        'gemini-1.5-pro-002',       // Pro versão 002
+        'gemini-pro-vision'         // Legado (muito estável para contas antigas)
     ];
+
+    let lastError = null;
 
     for (const model of visionModels) {
         try {
-            console.log(`Tentando descrever imagem com modelo: ${model}`);
+            console.log(`Tentando ler imagem com modelo: ${model}`);
             const response = await ai.models.generateContent({
                 model: model,
                 contents: { parts: [...imageParts, { text: prompt }] }
             });
             
             const text = response.candidates?.[0]?.content?.parts?.[0]?.text;
-            if (text) return text;
+            if (text) {
+                console.log(`✅ Sucesso com o modelo: ${model}`);
+                return text;
+            }
             
         } catch (error: any) {
             const msg = error.message || '';
-            console.warn(`Falha ao usar modelo ${model}:`, msg);
+            console.warn(`❌ Falha ao usar modelo ${model}:`, msg);
+            lastError = error;
             
-            // Se o erro for 'limit: 0' (sem acesso), pula imediatamente para o próximo modelo
-            if (msg.includes('limit: 0') || msg.includes('not found') || msg.includes('404')) {
-                continue; 
-            }
-            
-            // Se for cota temporária (429 mas com limite > 0), lança o erro para o retry externo esperar
-            if (msg.includes('429') || msg.includes('RESOURCE')) {
-                throw error;
-            }
-            // Tenta o próximo modelo da lista
+            // Se for erro de Cota TEMPORÁRIA (429), não adianta mudar de modelo, tem que esperar.
+            // Mas como estamos dentro de um fluxo maior, vamos deixar o loop continuar para ver se outro modelo tem cota livre.
+            // (Muitas vezes a cota é por modelo, então mudar de modelo AJUDA).
             continue;
         }
     }
-    throw new Error("Não foi possível ler a imagem de referência. Sua conta parece não ter acesso aos modelos de visão atuais.");
+    
+    console.error("Todos os modelos de visão falharam.");
+    throw new Error(`Não foi possível ler a imagem. Detalhe do último erro: ${lastError?.message}`);
 }
 
 /**
@@ -128,10 +133,9 @@ export const generateImageWithReference = async (
                 inlineData: { data: image.data, mimeType: image.mimeType },
             }));
 
-            // Aqui usamos a nova função robusta que tenta vários modelos
+            // Chama a função que tenta TODOS os modelos
             const imageDescription = await describeImageWithFallback(imageParts, descriptionPrompt);
-            console.log("Descrição obtida com sucesso.");
-
+            
             const finalPrompt = `
             Create a YouTube thumbnail.
             Reference Style/Content: ${imageDescription}
