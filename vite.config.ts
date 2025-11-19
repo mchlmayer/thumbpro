@@ -3,7 +3,7 @@ import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 
 export default defineConfig(({ mode }) => {
-  // Garante que carregamos as variáveis do diretório atual
+  // Carrega as variáveis de ambiente corretamente
   const env = loadEnv(mode, process.cwd(), '');
 
   return {
@@ -13,18 +13,16 @@ export default defineConfig(({ mode }) => {
     },
     plugins: [react()],
     define: {
-      // Define as variáveis globais para evitar "process is not defined" no navegador
-      // Certifique-se de adicionar 'GEMINI_API_KEY' nas configurações de Environment Variables do Vercel
+      // Disponibiliza a API Key para o frontend
       'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)
     },
     resolve: {
       alias: {
-        // CORREÇÃO: O alias @ deve apontar para a pasta src, não para a raiz (.)
+        // Corrige o apontamento do @ para a pasta src
         '@': path.resolve(__dirname, './src'),
       }
     },
-    // Configuração de build para garantir compatibilidade
     build: {
       outDir: 'dist',
       assetsDir: 'assets',
