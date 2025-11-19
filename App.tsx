@@ -241,7 +241,7 @@ const App: React.FC = () => {
                 id="prompt"
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
-                placeholder={isEditing ? 'Ex: Adicione explosões ao fundo, mude o céu para roxo...' : 'Ex: Homem segurando controle de videogame, fundo gamer quarto neon...'}
+                placeholder={isEditing ? 'Ex: Adicione explosões ao fundo, mude o céu para roxo...' : 'Descreva sua ideia para a thumbnail (ex: Reação de surpresa, fundo neon, texto "INCRÍVEL" em destaque...)'}
                 className="w-full bg-gray-900 border border-gray-600 rounded-lg p-4 focus:ring-2 focus:ring-blue-500 transition-all h-32 text-gray-200"
                 disabled={isLoading}
                 />
@@ -327,7 +327,7 @@ const App: React.FC = () => {
               <div className="text-center z-10">
                 <Spinner className="w-16 h-16 mx-auto text-purple-400" />
                 <p className="mt-4 text-gray-400 animate-pulse">Criando sua arte no formato {aspectRatio}...</p>
-                <p className="text-sm text-gray-500 mt-2">Isso pode levar alguns segundos.</p>
+                <p className="text-sm text-gray-500 mt-2">Estamos gerenciando o tráfego da API, aguarde...</p>
               </div>
             )}
             {error && (
