@@ -307,7 +307,7 @@ const App: React.FC = () => {
                 className="w-full bg-gradient-to-r from-purple-600 to-blue-600 text-white font-bold py-4 px-4 rounded-lg hover:from-purple-700 hover:to-blue-700 transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center shadow-lg text-lg"
               >
                 {isLoading && <Spinner className="w-6 h-6 mr-2" />}
-                {isLoading ? (isEditing ? 'Processando Ajuste...' : 'Gerando...') : (isEditing ? 'Aplicar Ajustes' : 'Gerar Thumbnail')}
+                {isLoading ? (isEditing ? 'Processando...' : 'Gerando...') : (isEditing ? 'Aplicar Ajustes' : 'Gerar Thumbnail')}
               </button>
               {isEditing && (
                 <button
@@ -327,7 +327,6 @@ const App: React.FC = () => {
               <div className="text-center z-10">
                 <Spinner className="w-16 h-16 mx-auto text-purple-400" />
                 <p className="mt-4 text-gray-400 animate-pulse">Criando sua arte no formato {aspectRatio}...</p>
-                <p className="text-sm text-gray-500 mt-2">Estamos gerenciando o tráfego da API, aguarde...</p>
               </div>
             )}
             {error && (
