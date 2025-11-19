@@ -11,23 +11,22 @@ const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 /**
  * Generates an image using Gemini 2.5 Flash Image.
- * Switched from Imagen to Flash Image to reduce 'Resource Exhausted' errors and improve availability.
+ * Optimized for free tier: faster retries, fail fast approach.
  */
 export const generateImageWithText = async (
     prompt: string, 
     aspectRatio: string = '16:9'
 ): Promise<string> => {
   let attempts = 0;
-  // Aumentado para 10 tentativas para garantir que passe por janelas de 1 minuto de cota
-  const maxAttempts = 10;
+  // Reduzido para 3 tentativas para evitar que o usuário espere eternamente.
+  const maxAttempts = 3;
 
-  // Append aspect ratio instruction to the prompt since Flash Image handles it via text better than config sometimes
-  const enhancedPrompt = `${prompt}. The image should be in ${aspectRatio} aspect ratio. High quality YouTube Thumbnail, vivid colors.`;
+  // Prompt otimizado para o modelo Flash
+  const enhancedPrompt = `Create a high quality YouTube Thumbnail. Aspect Ratio: ${aspectRatio}. Description: ${prompt}. Vivid colors, 4k resolution.`;
 
   while (true) {
     try {
       attempts++;
-      console.log(`Generating image with Gemini 2.5 Flash Image [Ratio: ${aspectRatio}] (Attempt ${attempts}):`, prompt);
       
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash-image',
@@ -40,14 +39,11 @@ export const generateImageWithText = async (
         },
         config: {
             responseModalities: [Modality.IMAGE], 
-            // Note: aspectRatio config is not strictly supported in generateContent for Flash Image the same way as generateImages, 
-            // so we rely on the prompt injection above.
         },
       });
 
       let base64ImageBytes = '';
       
-      // Extract image from Gemini 2.5 Flash Image response structure
       if (response.candidates && response.candidates[0].content && response.candidates[0].content.parts) {
           for (const part of response.candidates[0].content.parts) {
               if (part.inlineData && part.inlineData.data) {
@@ -67,11 +63,10 @@ export const generateImageWithText = async (
         const isQuotaError = error instanceof Error && (error.message.includes('429') || error.message.includes('RESOURCE_EXHAUSTED') || error.message.includes('quota'));
         
         if (isQuotaError && attempts < maxAttempts) {
-            // Estratégia muito agressiva para limites de 1 minuto.
-            // Espera progressiva: 15s, 30s, 45s...
-            // Isso garante que superaremos o limite de "requests per minute".
-            const delay = 15000 * attempts; 
-            console.warn(`Quota hit (Gemini Flash Image). Retrying in ${delay}ms...`);
+            // Espera fixa curta de 3 segundos. É melhor falhar rápido e deixar o usuário tentar de novo
+            // do que deixar a tela presa por minutos.
+            const delay = 3000; 
+            console.warn(`Quota hit (Attempt ${attempts}). Retrying in ${delay}ms...`);
             await wait(delay);
             continue;
         }
@@ -79,22 +74,21 @@ export const generateImageWithText = async (
         console.error("Error calling Gemini API:", error);
         if (error instanceof Error) {
             if (isQuotaError) {
-              throw new Error("O sistema está com tráfego extremamente alto. Tente novamente em alguns minutos.");
+              throw new Error("Muitos acessos simultâneos. Por favor, clique em 'Gerar' novamente.");
             }
-            if (error.message.includes('safetySetting')) {
-                throw new Error("Erro de configuração de segurança no modelo.");
+            if (error.message.includes('safetySetting') || error.message.includes('blocked')) {
+                throw new Error("A imagem não pôde ser gerada devido aos filtros de segurança do Google. Tente mudar a descrição.");
             }
             throw new Error(`Falha ao gerar imagem: ${error.message}`);
         }
-        throw new Error("Um erro inesperado ocorreu durante a geração da imagem.");
+        throw new Error("Um erro inesperado ocorreu.");
     }
   }
 };
 
 
 /**
- * Uses gemini-2.5-flash-image to edit/composite the reference image with the user prompt.
- * This preserves the original subject better than regenerating from text description.
+ * Uses gemini-2.5-flash-image to edit/composite the reference image.
  */
 export const generateImageWithReference = async (
     prompt: string, 
@@ -102,25 +96,18 @@ export const generateImageWithReference = async (
     aspectRatio: string = '16:9'
 ): Promise<string> => {
     let attempts = 0;
-    // Aumentado para 10 tentativas para garantir robustez contra erros de cota
-    const maxAttempts = 10;
+    const maxAttempts = 3;
 
     while (true) {
         try {
             attempts++;
-            console.log(`Editing reference with Gemini 2.5 Flash Image (Attempt ${attempts})...`);
-
-            // Instructions to ensure the model uses the image as a base rather than just inspiration
-            // Keeping it generic as requested, preserving the subject and style.
+            
             const editingPrompt = `
-                Task: Create a high-quality YouTube Thumbnail based on the provided reference image.
+                Create a YouTube Thumbnail.
+                Reference Image provided.
                 User Instructions: ${prompt}
-                Target Aspect Ratio: ${aspectRatio}
-                
-                IMPORTANT: 
-                - Preserve the main subject/person from the reference image. Do not replace them.
-                - Integrate the user's requested elements (text, background, objects) around the subject.
-                - High saturation, catchy YouTube style.
+                Output Aspect Ratio: ${aspectRatio}
+                Style: High quality, vivid, clickbait style.
             `;
 
             const imageParts = images.map(image => ({
@@ -140,11 +127,9 @@ export const generateImageWithReference = async (
                 },
                 config: {
                     responseModalities: [Modality.IMAGE],
-                    // Removed safetySettings to fix 400 error ("Only block_low_and_above is supported")
                 },
             });
 
-            // Extract image from Gemini 2.5 Flash Image response structure
             let base64ImageBytes = '';
             
             if (response.candidates && response.candidates[0].content && response.candidates[0].content.parts) {
@@ -166,10 +151,8 @@ export const generateImageWithReference = async (
             const isQuotaError = error instanceof Error && (error.message.includes('429') || error.message.includes('RESOURCE_EXHAUSTED') || error.message.includes('quota'));
 
             if (isQuotaError && attempts < maxAttempts) {
-                // Estratégia muito agressiva para limites de 1 minuto.
-                // Espera progressiva: 15s, 30s, 45s...
-                const delay = 15000 * attempts;
-                console.warn(`Quota hit (Gemini Flash Image Ref). Retrying in ${delay}ms...`);
+                const delay = 3000;
+                console.warn(`Quota hit (Ref Attempt ${attempts}). Retrying in ${delay}ms...`);
                 await wait(delay);
                 continue;
             }
@@ -177,14 +160,14 @@ export const generateImageWithReference = async (
             console.error("Error calling Gemini API:", error);
             if (error instanceof Error) {
                 if (isQuotaError) {
-                    throw new Error("Muitas solicitações recentes. Aguarde um momento antes de tentar novamente.");
+                    throw new Error("Tráfego alto. Tente novamente em alguns instantes.");
                 }
-                if (error.message.includes('safetySetting')) {
-                     throw new Error("Erro de configuração da API (Safety Settings). Tente novamente.");
+                if (error.message.includes('safetySetting') || error.message.includes('blocked')) {
+                     throw new Error("Conteúdo bloqueado pelos filtros de segurança. Tente suavizar a descrição.");
                 }
                 throw new Error(`Falha ao gerar imagem com referência: ${error.message}`);
             }
-            throw new Error("Um erro inesperado ocorreu durante o processamento da referência.");
+            throw new Error("Erro inesperado ao processar referência.");
         }
     }
 };
