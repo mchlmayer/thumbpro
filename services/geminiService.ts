@@ -6,8 +6,8 @@ if (!process.env.API_KEY) {
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-// Definindo o modelo Flash para todas as operações para economizar quota e ganhar velocidade
-const MODEL_NAME = 'gemini-2.5-flash-preview'; 
+// CORREÇÃO: O nome correto do modelo rápido que gera imagens é gemini-2.0-flash-exp
+const MODEL_NAME = 'gemini-2.0-flash-exp'; 
 
 /**
  * Helper para extrair a imagem base64 da resposta do Gemini
@@ -16,7 +16,6 @@ const extractImageFromCandidate = (response: any): string => {
     const candidate = response.candidates?.[0];
 
     if (!candidate || !candidate.content || !candidate.content.parts) {
-        // Tratamento de erro específico para bloqueios de segurança
         if (candidate?.finishReason && candidate.finishReason !== 'STOP') {
             if (['SAFETY', 'BLOCK', 'PROHIBITED_CONTENT'].includes(candidate.finishReason)) {
                 throw new Error("A imagem foi bloqueada pelo filtro de segurança. Tente um prompt mais leve.");
@@ -36,24 +35,22 @@ const extractImageFromCandidate = (response: any): string => {
 };
 
 /**
- * Gera uma imagem a partir de texto usando Gemini Flash.
- * Muito mais rápido e com limites maiores que o Imagen puro.
+ * Gera uma imagem a partir de texto usando Gemini 2.0 Flash.
  */
 export const generateImageWithText = async (
     prompt: string, 
     aspectRatio: string = '16:9'
 ): Promise<string> => {
   try {
-    console.log(`Gerando imagem (Flash T2I) [Ratio: ${aspectRatio}]:`, prompt);
+    console.log(`Gerando imagem (Gemini 2.0 Flash) [Ratio: ${aspectRatio}]:`, prompt);
 
-    // Adiciona instrução de aspect ratio no prompt, já que o Flash obedece melhor via texto
     const enhancedPrompt = `Create a high-quality youtube thumbnail: ${prompt}. Aspect Ratio: ${aspectRatio}. Photorealistic, 8k, detailed.`;
 
     const response = await ai.models.generateContent({
       model: MODEL_NAME,
       contents: { parts: [{ text: enhancedPrompt }] },
       config: {
-        responseModalities: [Modality.IMAGE], // Força a saída ser uma imagem
+        responseModalities: [Modality.IMAGE], 
         safetySettings: [
             { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
             { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
@@ -66,8 +63,12 @@ export const generateImageWithText = async (
     return extractImageFromCandidate(response);
 
   } catch (error) {
-    console.error("Erro no Gemini Flash (Texto):", error);
+    console.error("Erro no Gemini 2.0 Flash:", error);
     if (error instanceof Error) {
+        // Se o modelo experimental não for encontrado (404), avisamos o usuário
+        if (error.message.includes('404') || error.message.includes('not found')) {
+             throw new Error("O modelo Gemini 2.0 Flash ainda não está disponível para sua chave. Tente usar o Imagen.");
+        }
         if (error.message.includes('429') || error.message.includes('RESOURCE_EXHAUSTED')) {
           throw new Error("Limite de requisições atingido (Quota). Aguarde alguns instantes.");
         }
@@ -78,7 +79,7 @@ export const generateImageWithText = async (
 };
 
 /**
- * Edita ou gera baseada em referência usando Gemini Flash.
+ * Edita ou gera baseada em referência usando Gemini 2.0 Flash.
  */
 export const generateImageWithReference = async (
     prompt: string, 
@@ -93,7 +94,7 @@ Output Aspect Ratio: ${aspectRatio}
 Ensure high quality and photorealism.
 `;
 
-        console.log(`Gerando com referência (Flash I2I) [Ratio: ${aspectRatio}]`);
+        console.log(`Gerando com referência (Gemini 2.0 Flash) [Ratio: ${aspectRatio}]`);
 
         const imageParts = images.map(image => ({
             inlineData: {
@@ -103,7 +104,7 @@ Ensure high quality and photorealism.
         }));
 
         const response = await ai.models.generateContent({
-            model: MODEL_NAME, // Usando o mesmo modelo Flash
+            model: MODEL_NAME, 
             contents: { parts: [ ...imageParts, { text: enhancedPrompt } ] },
             config: {
                 responseModalities: [Modality.IMAGE],
@@ -119,7 +120,7 @@ Ensure high quality and photorealism.
         return extractImageFromCandidate(response);
 
     } catch (error) {
-        console.error("Erro no Gemini Flash (Referência):", error);
+        console.error("Erro no Gemini 2.0 Flash (Referência):", error);
         if (error instanceof Error) {
             if (error.message.includes('429') || error.message.includes('RESOURCE_EXHAUSTED')) {
                 throw new Error("Limite de requisições atingido. Aguarde um momento.");
