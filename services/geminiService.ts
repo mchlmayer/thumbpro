@@ -1,11 +1,8 @@
 import { GoogleGenAI, Modality } from "@google/genai";
 
-// Utilitário para aguardar um tempo (em ms)
-const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
 /**
- * Generates an image using Gemini 2.5 Flash Image.
- * Optimized for free tier with exponential backoff.
+ * Generates an image using Imagen 4.0 (primary) or Gemini 2.5 Flash (fallback).
+ * Removes retry loops to give immediate feedback.
  */
 export const generateImageWithText = async (
     prompt: string, 
@@ -15,82 +12,79 @@ export const generateImageWithText = async (
     throw new Error("API_KEY environment variable not set");
   }
   
-  // Initialize client per request to ensure freshness
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-  let attempts = 0;
-  const maxAttempts = 5;
-
-  // Prompt otimizado para o modelo Flash
-  const enhancedPrompt = `Create a high quality YouTube Thumbnail. Aspect Ratio: ${aspectRatio}. Description: ${prompt}. Vivid colors, 4k resolution.`;
-
-  while (true) {
-    try {
-      attempts++;
-      
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash-image',
-        contents: {
-          parts: [
-            {
-              text: enhancedPrompt,
-            },
-          ],
-        },
+  // Tenta primeiro o modelo Imagen 4.0 (Maior qualidade, cota diferente)
+  try {
+      const response = await ai.models.generateImages({
+        model: 'imagen-4.0-generate-001',
+        prompt: prompt,
         config: {
-            responseModalities: [Modality.IMAGE], 
+          numberOfImages: 1,
+          outputMimeType: 'image/jpeg',
+          // Cast as any because the string values from app match the API requirements perfectly
+          aspectRatio: aspectRatio as any, 
         },
       });
 
-      let base64ImageBytes = '';
+      const base64 = response.generatedImages?.[0]?.image?.imageBytes;
+      if (!base64) throw new Error("Imagen 4.0 não retornou dados.");
       
-      if (response.candidates && response.candidates[0].content && response.candidates[0].content.parts) {
-          for (const part of response.candidates[0].content.parts) {
-              if (part.inlineData && part.inlineData.data) {
-                  base64ImageBytes = part.inlineData.data;
-                  break;
-              }
-          }
-      }
+      return base64;
 
-      if (!base64ImageBytes) {
-          throw new Error("Os dados da imagem recebidos estão vazios.");
-      }
+  } catch (imagenError: any) {
+     console.warn("Imagen 4.0 indisponível, tentando fallback para Flash...", imagenError);
+     
+     // Fallback: Tenta o Gemini 2.5 Flash Image uma única vez
+     try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash-image',
+            contents: {
+              parts: [
+                {
+                  text: `Create a high quality YouTube Thumbnail. Aspect Ratio: ${aspectRatio}. Description: ${prompt}. Vivid colors, 4k resolution.`,
+                },
+              ],
+            },
+            config: {
+                responseModalities: [Modality.IMAGE], 
+            },
+        });
 
-      return base64ImageBytes;
-
-    } catch (error) {
-        const isQuotaError = error instanceof Error && (error.message.includes('429') || error.message.includes('RESOURCE_EXHAUSTED') || error.message.includes('quota'));
+        let base64ImageBytes = '';
         
-        if (isQuotaError && attempts < maxAttempts) {
-            // Backoff Exponencial: 2s, 4s, 8s, 10s, 10s...
-            // Isso permite cobrir janelas de tempo maiores onde o limite gratuito reseta.
-            const backoff = Math.min(10000, Math.pow(2, attempts) * 1000);
-            const delay = backoff + (Math.random() * 1000); // Jitter
-            
-            console.warn(`Quota hit (Attempt ${attempts}). Retrying in ${Math.round(delay)}ms...`);
-            await wait(delay);
-            continue;
+        if (response.candidates && response.candidates[0].content && response.candidates[0].content.parts) {
+            for (const part of response.candidates[0].content.parts) {
+                if (part.inlineData && part.inlineData.data) {
+                    base64ImageBytes = part.inlineData.data;
+                    break;
+                }
+            }
         }
 
-        console.error("Error calling Gemini API:", error);
-        if (error instanceof Error) {
-            if (isQuotaError) {
-              throw new Error("Muitos acessos recentes. O limite gratuito foi atingido momentaneamente. Aguarde 1 minuto e tente novamente.");
-            }
-            if (error.message.includes('safetySetting') || error.message.includes('blocked')) {
-                throw new Error("A imagem não pôde ser gerada devido aos filtros de segurança do Google. Tente mudar a descrição.");
-            }
-            throw new Error(`Falha ao gerar imagem: ${error.message}`);
+        if (!base64ImageBytes) {
+            throw new Error("Dados de imagem vazios no fallback.");
         }
-        throw new Error("Um erro inesperado ocorreu.");
-    }
+
+        return base64ImageBytes;
+
+     } catch (flashError: any) {
+        // Se ambos falharem, retorna erro direto para o usuário
+        if (flashError.message?.includes('429') || flashError.message?.includes('quota') || flashError.message?.includes('RESOURCE_EXHAUSTED')) {
+            throw new Error("Cota excedida temporariamente. O Google limitou as gerações gratuitas neste momento.");
+        }
+        if (flashError.message?.includes('safety') || flashError.message?.includes('blocked')) {
+            throw new Error("A imagem foi bloqueada pelos filtros de segurança.");
+        }
+        throw new Error("Não foi possível gerar a imagem com nenhum dos modelos disponíveis.");
+     }
   }
 };
 
 
 /**
  * Uses gemini-2.5-flash-image to edit/composite the reference image.
+ * Reference editing is only supported well on Flash models currently.
  */
 export const generateImageWithReference = async (
     prompt: string, 
@@ -103,80 +97,60 @@ export const generateImageWithReference = async (
 
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-    let attempts = 0;
-    const maxAttempts = 5;
+    try {
+        const editingPrompt = `
+            Create a YouTube Thumbnail.
+            Reference Image provided.
+            User Instructions: ${prompt}
+            Output Aspect Ratio: ${aspectRatio}
+            Style: High quality, vivid, clickbait style.
+        `;
 
-    while (true) {
-        try {
-            attempts++;
-            
-            const editingPrompt = `
-                Create a YouTube Thumbnail.
-                Reference Image provided.
-                User Instructions: ${prompt}
-                Output Aspect Ratio: ${aspectRatio}
-                Style: High quality, vivid, clickbait style.
-            `;
+        const imageParts = images.map(image => ({
+            inlineData: {
+                data: image.data,
+                mimeType: image.mimeType,
+            },
+        }));
 
-            const imageParts = images.map(image => ({
-                inlineData: {
-                    data: image.data,
-                    mimeType: image.mimeType,
-                },
-            }));
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash-image',
+            contents: { 
+                parts: [ 
+                    ...imageParts, 
+                    { text: editingPrompt } 
+                ] 
+            },
+            config: {
+                responseModalities: [Modality.IMAGE],
+            },
+        });
 
-            const response = await ai.models.generateContent({
-                model: 'gemini-2.5-flash-image',
-                contents: { 
-                    parts: [ 
-                        ...imageParts, 
-                        { text: editingPrompt } 
-                    ] 
-                },
-                config: {
-                    responseModalities: [Modality.IMAGE],
-                },
-            });
-
-            let base64ImageBytes = '';
-            
-            if (response.candidates && response.candidates[0].content && response.candidates[0].content.parts) {
-                for (const part of response.candidates[0].content.parts) {
-                    if (part.inlineData && part.inlineData.data) {
-                        base64ImageBytes = part.inlineData.data;
-                        break;
-                    }
+        let base64ImageBytes = '';
+        
+        if (response.candidates && response.candidates[0].content && response.candidates[0].content.parts) {
+            for (const part of response.candidates[0].content.parts) {
+                if (part.inlineData && part.inlineData.data) {
+                    base64ImageBytes = part.inlineData.data;
+                    break;
                 }
             }
-
-            if (!base64ImageBytes) {
-                 throw new Error("O modelo não retornou uma imagem válida.");
-            }
-            
-            return base64ImageBytes;
-
-        } catch (error) {
-            const isQuotaError = error instanceof Error && (error.message.includes('429') || error.message.includes('RESOURCE_EXHAUSTED') || error.message.includes('quota'));
-
-            if (isQuotaError && attempts < maxAttempts) {
-                const backoff = Math.min(10000, Math.pow(2, attempts) * 1000);
-                const delay = backoff + (Math.random() * 1000);
-                console.warn(`Quota hit (Ref Attempt ${attempts}). Retrying in ${Math.round(delay)}ms...`);
-                await wait(delay);
-                continue;
-            }
-
-            console.error("Error calling Gemini API:", error);
-            if (error instanceof Error) {
-                if (isQuotaError) {
-                    throw new Error("Limite de tráfego atingido. Tente novamente em 1 minuto.");
-                }
-                if (error.message.includes('safetySetting') || error.message.includes('blocked')) {
-                     throw new Error("Conteúdo bloqueado pelos filtros de segurança. Tente suavizar a descrição.");
-                }
-                throw new Error(`Falha ao gerar imagem com referência: ${error.message}`);
-            }
-            throw new Error("Erro inesperado ao processar referência.");
         }
+
+        if (!base64ImageBytes) {
+                throw new Error("O modelo não retornou uma imagem válida.");
+        }
+        
+        return base64ImageBytes;
+
+    } catch (error: any) {
+        console.error("Reference generation error:", error);
+        if (error.message?.includes('429') || error.message?.includes('quota')) {
+            throw new Error("Muitas requisições. Tente novamente em 1 minuto.");
+        }
+        if (error.message?.includes('safety') || error.message?.includes('blocked')) {
+                throw new Error("Conteúdo bloqueado pela segurança.");
+        }
+        throw new Error(`Falha ao gerar: ${error.message}`);
     }
 };
