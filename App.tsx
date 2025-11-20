@@ -20,6 +20,7 @@ interface HistoryItem {
 }
 
 const App: React.FC = () => {
+  // Prompt inicial limpo
   const [prompt, setPrompt] = useState<string>('');
   const [aspectRatio, setAspectRatio] = useState<string>('16:9');
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
@@ -131,7 +132,7 @@ const App: React.FC = () => {
     setReferenceImage(null);
     setReferenceImagePreview(null);
     setOriginalFile(null);
-    setPrompt('');
+    // Não limpa o prompt para facilitar ajustes
     setError(null);
   };
 
@@ -221,10 +222,10 @@ const App: React.FC = () => {
       <div className="container mx-auto max-w-7xl">
         <header className="text-center mb-8">
           <h1 className="text-4xl sm:text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-cyan-400">
-            Gerador de Thumbnails com IA
+            Gerador de Thumbnails
           </h1>
           <p className="text-gray-400 mt-2 text-lg">
-            Crie, ajuste e aperfeiçoe sua thumbnail dos sonhos.
+            Crie thumbnails incríveis para seus vídeos em segundos.
           </p>
         </header>
 
@@ -235,13 +236,13 @@ const App: React.FC = () => {
             {/* Descrição Principal */}
             <div>
                 <label htmlFor="prompt" className="text-sm font-bold text-blue-400 uppercase mb-2 block tracking-wider">
-                {isEditing ? 'O que mudar?' : 'Descrição do Cenário'}
+                {isEditing ? 'O que mudar?' : 'Descrição da Thumbnail'}
                 </label>
                 <textarea
                 id="prompt"
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
-                placeholder={isEditing ? 'Ex: Adicione explosões ao fundo, mude o céu para roxo...' : 'Descreva sua ideia para a thumbnail (ex: Reação de surpresa, fundo neon, texto "INCRÍVEL" em destaque...)'}
+                placeholder={isEditing ? 'Ex: Adicione explosões ao fundo, mude o céu para roxo...' : 'Descreva sua ideia para a thumbnail...'}
                 className="w-full bg-gray-900 border border-gray-600 rounded-lg p-4 focus:ring-2 focus:ring-blue-500 transition-all h-32 text-gray-200"
                 disabled={isLoading}
                 />
@@ -249,7 +250,7 @@ const App: React.FC = () => {
 
             {/* Proporção */}
             <div>
-               <label className="text-sm font-semibold mb-2 text-gray-400 block">Proporção da Imagem</label>
+               <label className="text-sm font-semibold mb-2 text-gray-400 block">Proporção</label>
                <div className="flex flex-wrap gap-2">
                   {ASPECT_RATIOS.map((ratio) => (
                       <button
@@ -271,7 +272,7 @@ const App: React.FC = () => {
             {/* Referência */}
             <div>
               <label className="text-sm font-semibold mb-2 text-gray-400 block">
-                {isEditing ? 'Adicionar Objeto/Referência Extra (Opcional)' : 'Sua Foto / Referência Principal (Opcional)'}
+                {isEditing ? 'Referência Extra (Opcional)' : 'Imagem de Referência (Opcional)'}
               </label>
               {referenceImagePreview ? (
                 <div className="relative group w-48 border border-gray-600 rounded-lg p-2 bg-gray-900">
@@ -294,7 +295,7 @@ const App: React.FC = () => {
                     className="w-full bg-gray-700 hover:bg-gray-600 text-gray-300 font-semibold py-3 px-4 rounded-lg transition-colors flex items-center justify-center border border-dashed border-gray-500 hover:border-gray-400"
                   >
                     <UploadIcon className="w-5 h-5 mr-2" />
-                    {isEditing ? 'Carregar Referência Extra' : 'Carregar Foto Principal'}
+                    {isEditing ? 'Carregar Referência' : 'Carregar Foto'}
                   </button>
                 </div>
               )}
@@ -307,7 +308,7 @@ const App: React.FC = () => {
                 className="w-full bg-gradient-to-r from-purple-600 to-blue-600 text-white font-bold py-4 px-4 rounded-lg hover:from-purple-700 hover:to-blue-700 transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center shadow-lg text-lg"
               >
                 {isLoading && <Spinner className="w-6 h-6 mr-2" />}
-                {isLoading ? (isEditing ? 'Processando...' : 'Gerando...') : (isEditing ? 'Aplicar Ajustes' : 'Gerar Thumbnail')}
+                {isLoading ? (isEditing ? 'Ajustando...' : 'Gerando...') : (isEditing ? 'Aplicar Ajustes' : 'Gerar Thumbnail')}
               </button>
               {isEditing && (
                 <button
@@ -315,7 +316,7 @@ const App: React.FC = () => {
                   disabled={isLoading}
                   className="w-full sm:w-auto bg-gray-600 text-white font-bold py-4 px-6 rounded-lg hover:bg-gray-500 transition-all duration-300 disabled:opacity-50"
                 >
-                  Resetar
+                  Nova
                 </button>
               )}
             </div>
@@ -326,14 +327,20 @@ const App: React.FC = () => {
             {isLoading && !generatedImage && (
               <div className="text-center z-10">
                 <Spinner className="w-16 h-16 mx-auto text-purple-400" />
-                <p className="mt-4 text-gray-400 animate-pulse">Criando sua arte no formato {aspectRatio}...</p>
+                <p className="mt-4 text-gray-400 animate-pulse font-medium">Criando arte em {aspectRatio}...</p>
               </div>
             )}
             {error && (
-              <div className="text-center text-red-400">
+              <div className="text-center text-red-400 px-4">
                 <ErrorIcon className="w-16 h-16 mx-auto" />
-                <p className="mt-4 font-semibold">Oops! Algo deu errado.</p>
-                <p className="text-sm text-gray-500 mt-1">{error}</p>
+                <p className="mt-4 font-semibold text-lg">Não foi possível gerar agora</p>
+                <p className="text-sm text-gray-400 mt-2 bg-gray-900 p-3 rounded border border-gray-700">{error}</p>
+                <button 
+                    onClick={handleGenerateClick}
+                    className="mt-4 bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded transition-colors"
+                >
+                    Tentar Novamente
+                </button>
               </div>
             )}
             {!error && generatedImage && (
@@ -347,7 +354,7 @@ const App: React.FC = () => {
                   {isLoading && (
                       <div className="absolute inset-0 flex flex-col items-center justify-center bg-black bg-opacity-50 rounded-lg">
                           <Spinner className="w-12 h-12 text-purple-400" />
-                          <p className="mt-3 text-white font-semibold">Ajustando detalhes...</p>
+                          <p className="mt-3 text-white font-semibold">Aplicando alterações...</p>
                       </div>
                   )}
                 </div>
@@ -364,8 +371,8 @@ const App: React.FC = () => {
             {!isLoading && !error && !generatedImage && (
               <div className="text-center text-gray-500">
                 <ImagePlaceholderIcon className="w-24 h-24 mx-auto" />
-                <p className="mt-4 text-lg">Sua imagem aparecerá aqui</p>
-                <p className="text-sm mt-2 opacity-70">Formato selecionado: {aspectRatio}</p>
+                <p className="mt-4 text-lg">Sua arte aparecerá aqui</p>
+                <p className="text-sm mt-2 opacity-70">Formato: {aspectRatio}</p>
               </div>
             )}
           </div>
@@ -393,7 +400,7 @@ const App: React.FC = () => {
                           </div>
                           {/* Hover Overlay */}
                           <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100">
-                              <span className="text-white text-sm font-bold bg-black bg-opacity-60 px-3 py-1 rounded-full backdrop-blur-sm">Carregar</span>
+                              <span className="text-white text-sm font-bold bg-black bg-opacity-60 px-3 py-1 rounded-full backdrop-blur-sm">Restaurar</span>
                           </div>
                       </div>
                   ))}
